@@ -1,0 +1,1610 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SDN Containernet Topology Monitor & Controller</title>
+  <meta name="description" content="Visual testing and monitoring dashboard for Containernet and Mininet SDN topologies with Vis.js visualizer, pingall, iperf, and dynamic rerouting." />
+
+  <!-- Google Fonts: Plus Jakarta Sans for UI, JetBrains Mono for telemetry -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#f0fdfa',
+              500: '#14b8a6',
+              600: '#0d9488',
+              700: '#0f766e',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Vis.js Network CDN -->
+  <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
+  <style>
+    /* Vis.js Canvas Container: explicit sizing to prevent collapse */
+    #topology-network {
+      width: 100%;
+      height: 550px;
+      min-height: 550px;
+      outline: none;
+    }
+    
+    /* Custom Scrollbar for Dark Console */
+    .console-scroll::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .console-scroll::-webkit-scrollbar-track {
+      background: #020617;
+    }
+    .console-scroll::-webkit-scrollbar-thumb {
+      background: #1e293b;
+      border-radius: 3px;
+    }
+    .console-scroll::-webkit-scrollbar-thumb:hover {
+      background: #334155;
+    }
+
+    /* Vis tooltip styling */
+    div.vis-tooltip {
+      position: absolute;
+      visibility: hidden;
+      padding: 6px 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: #f8fafc;
+      background-color: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+      pointer-events: none;
+      z-index: 100;
+    }
+  </style>
+</head>
+
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans selection:bg-teal-500/20 selection:text-teal-300 antialiased">
+
+  <!-- ====================================================================== -->
+  <!-- TOP BAR NAVIGATION (3-Zone Contract)                                    -->
+  <!-- ====================================================================== -->
+  <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur-md sticky top-0 z-40 px-6 py-3.5 flex items-center justify-between gap-8">
+    
+    <!-- Zone 1: Brand Wordmark & Mode Indicator -->
+    <div class="flex items-center gap-3 shrink-0">
+      <div class="w-8 h-8 rounded-lg bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400 font-mono font-bold text-sm">
+        SDN
+      </div>
+      <div>
+        <h1 class="text-base font-bold tracking-tight text-white flex items-center gap-2">
+          Containernet Topology Monitor
+          <span class="text-xs font-normal text-slate-400">· 10 Switches / 8 Hosts</span>
+        </h1>
+      </div>
+    </div>
+
+    <!-- Zone 2: Navigation / Quick Views -->
+    <nav class="hidden md:flex items-center gap-6 text-sm font-medium text-slate-400">
+      <button onclick="switchView('visualizer')" id="tab-visualizer" class="text-white hover:text-white transition-colors flex items-center gap-1.5 whitespace-nowrap">
+        <span>Topology Canvas</span>
+      </button>
+      <button onclick="switchView('paths')" id="tab-paths" class="hover:text-white transition-colors flex items-center gap-1.5 whitespace-nowrap">
+        <span>Candidate Paths</span>
+      </button>
+      <button onclick="switchView('matrix')" id="tab-matrix" class="hover:text-white transition-colors flex items-center gap-1.5 whitespace-nowrap">
+        <span>Ping Matrix</span>
+      </button>
+      <button onclick="openApiModal()" class="hover:text-white transition-colors flex items-center gap-1.5 whitespace-nowrap text-xs text-slate-400 border border-slate-800 rounded px-2.5 py-1">
+        <span id="bridge-url-display">API: localhost:5000</span>
+      </button>
+    </nav>
+
+    <!-- Zone 3: Connection Status Badge & Refresh -->
+    <div class="flex items-center gap-3 shrink-0">
+      <div id="connection-pill" class="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-mono border-amber-500/30 bg-amber-500/10 text-amber-400">
+        <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+        <span id="connection-status-text">Checking Bridge...</span>
+      </div>
+
+      <button onclick="fetchStatus(true)" title="Refresh Network State" class="p-1.5 rounded-lg border border-slate-800 bg-slate-800/60 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ====================================================================== -->
+  <!-- MAIN WORKSPACE                                                         -->
+  <!-- ====================================================================== -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 flex flex-col gap-6">
+
+    <!-- KPI STATS STRIP (Tabular Numerals) -->
+    <section class="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+      
+      <!-- Throughput -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Throughput</span>
+        <div class="flex items-baseline gap-1.5 mt-2">
+          <span id="stat-throughput" class="text-2xl font-bold font-mono text-white tabular-nums">94.8</span>
+          <span class="text-xs text-slate-400">Mbps</span>
+        </div>
+        <div class="w-full bg-slate-800 h-1.5 rounded-full mt-2.5 overflow-hidden">
+          <div id="stat-throughput-bar" class="bg-teal-500 h-full rounded-full transition-all duration-500" style="width: 94.8%"></div>
+        </div>
+      </div>
+
+      <!-- Latency -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Avg Latency</span>
+        <div class="flex items-baseline gap-1.5 mt-2">
+          <span id="stat-latency" class="text-2xl font-bold font-mono text-white tabular-nums">4.2</span>
+          <span class="text-xs text-slate-400">ms</span>
+        </div>
+        <span class="text-xs text-slate-500 mt-2.5">Per-hop ~2.0ms delay</span>
+      </div>
+
+      <!-- Packet Loss -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Packet Loss</span>
+        <div class="flex items-baseline gap-1.5 mt-2">
+          <span id="stat-loss" class="text-2xl font-bold font-mono text-emerald-400 tabular-nums">0.0%</span>
+        </div>
+        <span id="stat-loss-label" class="text-xs text-slate-500 mt-2.5">Healthy Full Reachability</span>
+      </div>
+
+      <!-- Active Flows -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Active OpenFlow Rules</span>
+        <div class="flex items-baseline gap-1.5 mt-2">
+          <span id="stat-flows" class="text-2xl font-bold font-mono text-white tabular-nums">24</span>
+          <span class="text-xs text-slate-400">flows</span>
+        </div>
+        <span class="text-xs text-slate-500 mt-2.5">Priority 50000 match</span>
+      </div>
+
+      <!-- Controller & Links -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between col-span-2 sm:col-span-1">
+        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Active Topology Links</span>
+        <div class="flex items-baseline gap-1.5 mt-2">
+          <span id="stat-links" class="text-2xl font-bold font-mono text-teal-400 tabular-nums">21/21</span>
+          <span class="text-xs text-slate-400">core</span>
+        </div>
+        <span id="stat-controller" class="text-xs text-slate-500 mt-2.5 truncate">c0 (ONOS) :6653</span>
+      </div>
+    </section>
+
+    <!-- ACTIVE ROUTING POLICY NOTIFICATION BAR -->
+    <section class="bg-slate-900/60 border border-slate-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+      <div class="flex items-center gap-3">
+        <span class="font-mono text-teal-400 font-semibold px-2 py-0.5 rounded bg-teal-500/10 border border-teal-500/20" id="policy-badge">P0: Path 1 Primary</span>
+        <span class="text-slate-300" id="policy-desc">Traffic: 100% via Path 1 (s1-s4-s7-s8) · Egress Port 4 on s1</span>
+      </div>
+      <div class="flex items-center gap-2 text-slate-400 font-mono">
+        <span>Group ID: <strong class="text-white" id="policy-group-id">101</strong></span>
+        <span>·</span>
+        <span id="policy-updated">Updated: Just now</span>
+      </div>
+    </section>
+
+    <!-- ==================================================================== -->
+    <!-- MAIN TWO-COLUMN SPLIT: TOPOLOGY CANVAS + CONTROL PANEL               -->
+    <!-- ==================================================================== -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      
+      <!-- LEFT 7 COLS: VIS.JS TOPOLOGY VISUALIZER -->
+      <div class="lg:col-span-7 flex flex-col gap-3">
+        
+        <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-xl">
+          
+          <!-- Canvas Toolbar Header -->
+          <div class="px-4 py-3 border-b border-slate-800 flex items-center justify-between gap-4 bg-slate-900/90">
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm font-semibold text-white">SDN Topology Graph</h2>
+              <span class="text-xs text-slate-500">· Interactive Network Canvas</span>
+            </div>
+
+            <!-- Graph Controls -->
+            <div class="flex items-center gap-2">
+              <button onclick="resetGraphFit()" class="px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors" title="Fit Network to Viewport">
+                Fit View
+              </button>
+              <button onclick="togglePhysics()" id="btn-physics" class="px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors" title="Toggle Graph Physics Simulation">
+                Physics: On
+              </button>
+              <button onclick="highlightPrimaryPaths()" class="px-2.5 py-1 text-xs font-medium rounded-lg bg-teal-500/10 border border-teal-500/30 text-teal-300 hover:bg-teal-500/20 transition-colors">
+                Highlight Routes
+              </button>
+            </div>
+          </div>
+
+          <!-- The Vis.js Canvas Element: Explicit Minimum Height 550px -->
+          <div class="relative bg-slate-950 min-h-[550px] h-[550px] w-full flex items-center justify-center">
+            <div id="topology-network" style="height: 550px; min-height: 550px;"></div>
+            
+            <!-- Canvas Legend Overlay -->
+            <div class="absolute bottom-3 left-3 bg-slate-900/90 border border-slate-800 rounded-lg p-2.5 text-[11px] font-mono text-slate-300 backdrop-blur pointer-events-none flex flex-col gap-1.5 shadow-lg">
+              <div class="flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full bg-emerald-600 border border-emerald-400"></span>
+                <span>Docker Container Host (shape: dot)</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="w-3 h-3 rounded bg-slate-800 border border-sky-400"></span>
+                <span>OpenFlow 1.3 Switch (shape: box)</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="w-4 h-0.5 bg-[#00d2ff] inline-block"></span>
+                <span>Operational Link (100 Mbps, 2ms)</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="w-4 h-0.5 border-t border-dashed border-rose-500 inline-block"></span>
+                <span>Link Failure (Down / Severed)</span>
+              </div>
+            </div>
+
+            <!-- Click Inspector Tooltip / Floating Card -->
+            <div id="selection-inspector" class="hidden absolute top-3 right-3 max-w-xs bg-slate-900/95 border border-slate-700 rounded-lg p-3 text-xs shadow-xl backdrop-blur">
+              <div class="flex items-center justify-between mb-2">
+                <span id="inspect-title" class="font-bold text-white font-mono">Link Selection</span>
+                <button onclick="closeInspector()" class="text-slate-400 hover:text-white">✕</button>
+              </div>
+              <div id="inspect-body" class="text-slate-300 font-mono text-[11px] space-y-1 mb-3">
+                <!-- dynamic -->
+              </div>
+              <div id="inspect-action" class="flex gap-2">
+                <!-- dynamic button -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Canvas Sub-footer -->
+          <div class="px-4 py-2 bg-slate-900/80 border-t border-slate-800 text-xs text-slate-400 flex items-center justify-between">
+            <span>Tip: Drag nodes to rearrange · Scroll to zoom · Click links or switches to inspect</span>
+            <span id="canvas-last-sync" class="font-mono text-[11px] text-slate-500">Synced: 05:50:00</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT 5 COLS: INTERACTIVE CONTROL PANEL -->
+      <div class="lg:col-span-5 flex flex-col gap-4">
+        
+        <!-- Panel 1: Full-Mesh PingAll Test -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h3 class="text-sm font-semibold text-white">Full-Mesh Ping Reachability</h3>
+              <p class="text-xs text-slate-400 mt-0.5">Test end-to-end reachability across all 56 host pairs</p>
+            </div>
+            <button id="btn-pingall" onclick="runPingAll()" class="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white font-medium text-xs rounded-lg transition-colors flex items-center gap-2 shadow-sm">
+              <svg id="ping-spinner" class="hidden w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+              </svg>
+              <span id="ping-text">Run PingAll</span>
+            </button>
+          </div>
+          <div id="pingall-result-summary" class="hidden text-xs font-mono bg-slate-950 p-3 rounded-lg border border-slate-800 text-slate-300">
+            <!-- Ping summary filled dynamically -->
+          </div>
+        </div>
+
+        <!-- Panel 2: Link Failure Simulation & Recovery -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
+          <h3 class="text-sm font-semibold text-white mb-1">Simulate Link Failure & Recovery</h3>
+          <p class="text-xs text-slate-400 mb-3">Toggles switch interfaces via Open vSwitch (<code class="font-mono text-teal-400">ovs-ofctl</code> / <code class="font-mono text-teal-400">ip link</code>)</p>
+
+          <div class="flex flex-col gap-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Select Topology Link:</label>
+              <select id="link-select" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-teal-500">
+                <!-- Dynamically populated links -->
+              </select>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2.5">
+              <button onclick="toggleSelectedLink('down')" id="btn-link-down" class="px-3 py-2 bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 font-medium text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg>
+                <span>Simulate Failure</span>
+              </button>
+              <button onclick="toggleSelectedLink('up')" id="btn-link-up" class="px-3 py-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 font-medium text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
+                <span>Recover Link</span>
+              </button>
+            </div>
+
+            <!-- Quick Scenario Shortcuts -->
+            <div class="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
+              <span class="text-slate-500">Quick Test:</span>
+              <div class="flex gap-2">
+                <button onclick="quickFailoverPath1()" class="text-xs text-rose-400 hover:text-rose-300 underline font-mono">Fail s4-s7 (Path 1)</button>
+                <span class="text-slate-600">·</span>
+                <button onclick="quickRestoreAll()" class="text-xs text-teal-400 hover:text-teal-300 underline font-mono">Restore All Links</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Panel 3: Measure Bandwidth (iperf) -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
+          <h3 class="text-sm font-semibold text-white mb-1">Measure Bandwidth (iperf)</h3>
+          <p class="text-xs text-slate-400 mb-3">Execute throughput benchmark between Docker container hosts</p>
+
+          <div class="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Source Host:</label>
+              <select id="iperf-src" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-teal-500">
+                <option value="h1" selected>h1 (10.0.0.1 @ s1)</option>
+                <option value="h2">h2 (10.0.0.2 @ s1)</option>
+                <option value="h3">h3 (10.0.0.3 @ s2)</option>
+                <option value="h4">h4 (10.0.0.4 @ s2)</option>
+                <option value="h5">h5 (10.0.0.5 @ s9)</option>
+                <option value="h6">h6 (10.0.0.6 @ s9)</option>
+                <option value="h7">h7 (10.0.0.7 @ s10)</option>
+                <option value="h8">h8 (10.0.0.8 @ s10)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Target Host:</label>
+              <select id="iperf-dst" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-teal-500">
+                <option value="h8" selected>h8 (10.0.0.8 @ s10)</option>
+                <option value="h7">h7 (10.0.0.7 @ s10)</option>
+                <option value="h6">h6 (10.0.0.6 @ s9)</option>
+                <option value="h5">h5 (10.0.0.5 @ s9)</option>
+                <option value="h4">h4 (10.0.0.4 @ s2)</option>
+                <option value="h3">h3 (10.0.0.3 @ s2)</option>
+                <option value="h2">h2 (10.0.0.2 @ s1)</option>
+                <option value="h1">h1 (10.0.0.1 @ s1)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <button id="btn-iperf" onclick="runIperf()" class="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-teal-400 font-medium text-xs rounded-lg transition-colors flex items-center justify-center gap-2 border border-slate-700">
+              <svg id="iperf-spinner" class="hidden w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+              </svg>
+              <span id="iperf-text">Run iperf Test</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Panel 4: Dynamic Reroute Trigger -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
+          <div class="flex items-center justify-between mb-1">
+            <h3 class="text-sm font-semibold text-white">Dynamic Reroute / Multi-Path</h3>
+            <span class="text-xs font-mono text-teal-400" id="reroute-algo">Adaptive TE</span>
+          </div>
+          <p class="text-xs text-slate-400 mb-3">Recomputes candidate path weights and installs OpenFlow SELECT groups on s1</p>
+
+          <div class="flex gap-2">
+            <select id="reroute-strategy" class="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-teal-500">
+              <option value="weighted" selected>Strategy: Weighted Health Score</option>
+              <option value="failover">Strategy: Strict Safe Failover</option>
+              <option value="shortest">Strategy: Shortest Hop Count</option>
+              <option value="lowest_delay">Strategy: Lowest Delay</option>
+            </select>
+            <button id="btn-reroute" onclick="triggerReroute()" class="px-4 py-1.5 bg-teal-600 hover:bg-teal-500 text-white font-medium text-xs rounded-lg transition-colors whitespace-nowrap">
+              Trigger Reroute
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ==================================================================== -->
+    <!-- SECONDARY VIEW PANELS: CANDIDATE PATHS & PING MATRIX                 -->
+    <!-- ==================================================================== -->
+    
+    <!-- Paths Drawer (Toggleable) -->
+    <div id="view-paths-container" class="hidden bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="text-base font-semibold text-white">Ingress-to-Egress Candidate Paths (s1 → s8)</h3>
+          <p class="text-xs text-slate-400 mt-0.5">Evaluated multi-path candidate routes discovered between switches s1 and s8</p>
+        </div>
+        <button onclick="switchView('visualizer')" class="text-xs text-slate-400 hover:text-white underline font-mono">Back to Graph</button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-3" id="candidate-paths-grid">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+
+    <!-- Ping Matrix Drawer (Toggleable) -->
+    <div id="view-matrix-container" class="hidden bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="text-base font-semibold text-white">Full-Mesh Host Reachability Matrix</h3>
+          <p class="text-xs text-slate-400 mt-0.5">Ping reachability between all 8 container hosts (Green = Reachable, Red = Dropped)</p>
+        </div>
+        <button onclick="switchView('visualizer')" class="text-xs text-slate-400 hover:text-white underline font-mono">Back to Graph</button>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs font-mono border-collapse" id="matrix-table">
+          <!-- Rendered dynamically -->
+        </table>
+      </div>
+    </div>
+
+    <!-- ==================================================================== -->
+    <!-- LIVE EXECUTION CONSOLE / TERMINAL                                    -->
+    <!-- ==================================================================== -->
+    <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl flex flex-col">
+      <!-- Terminal Header -->
+      <div class="bg-slate-900 px-4 py-2.5 border-b border-slate-800 flex items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <div class="flex gap-1.5">
+            <span class="w-3 h-3 rounded-full bg-rose-500/80 inline-block"></span>
+            <span class="w-3 h-3 rounded-full bg-amber-500/80 inline-block"></span>
+            <span class="w-3 h-3 rounded-full bg-emerald-500/80 inline-block"></span>
+          </div>
+          <span class="text-xs font-mono font-medium text-slate-300">Containernet CLI & API Telemetry Console</span>
+        </div>
+
+        <div class="flex items-center gap-3 text-xs font-mono">
+          <label class="flex items-center gap-1.5 text-slate-400 cursor-pointer">
+            <input type="checkbox" id="autoscroll-toggle" checked class="rounded bg-slate-800 border-slate-700 text-teal-500 focus:ring-0">
+            <span>Auto-scroll</span>
+          </label>
+          <button onclick="clearConsole()" class="text-slate-400 hover:text-white transition-colors">Clear</button>
+          <button onclick="copyConsoleLogs()" class="text-slate-400 hover:text-white transition-colors">Copy Logs</button>
+        </div>
+      </div>
+
+      <!-- Terminal Output Area -->
+      <div id="execution-console" class="bg-slate-950 p-4 font-mono text-xs text-slate-300 h-64 overflow-y-auto console-scroll space-y-1">
+        <div class="text-slate-500">[00:00:00] Initializing SDN Containernet Dashboard client...</div>
+        <div class="text-teal-400">[00:00:01] Vis.js network canvas loaded with 10 OpenFlow switches and 8 Docker hosts.</div>
+        <div class="text-slate-400">[00:00:01] Ready. Connect to local API bridge on http://localhost:5000 or use simulation mode.</div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ====================================================================== -->
+  <!-- API SETTINGS MODAL                                                     -->
+  <!-- ====================================================================== -->
+  <div id="api-modal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl max-w-md w-full p-6 shadow-2xl">
+      <h3 class="text-base font-bold text-white mb-2">API Bridge Configuration</h3>
+      <p class="text-xs text-slate-400 mb-4">
+        Specify the URL where your Python FastAPI/Flask bridge (<code class="text-teal-400 font-mono">app.py</code>) is running on your Mininet/Containernet host:
+      </p>
+
+      <div class="mb-4">
+        <label class="block text-xs font-medium text-slate-300 mb-1">API Base URL:</label>
+        <input type="text" id="modal-api-url" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-teal-500" value="http://localhost:5000" />
+      </div>
+
+      <div class="text-[11px] text-slate-400 font-mono bg-slate-950 p-3 rounded border border-slate-800 mb-4">
+        # Run bridge on your Mininet host:<br>
+        python3 app.py
+      </div>
+
+      <div class="flex justify-end gap-3">
+        <button onclick="closeApiModal()" class="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white rounded-lg">Cancel</button>
+        <button onclick="saveApiUrl()" class="px-4 py-2 text-xs font-medium bg-teal-600 hover:bg-teal-500 text-white rounded-lg">Save & Reconnect</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================================== -->
+  <!-- JAVASCRIPT: VIS.JS NETWORK GRAPH & API INTEGRATION                     -->
+  <!-- ====================================================================== -->
+  <script>
+    // Configuration
+    let API_BASE_URL = localStorage.getItem("sdn_api_url") || "http://localhost:5000";
+    let isBridgeOnline = false;
+    let network = null;
+    let nodesDataSet = null;
+    let edgesDataSet = null;
+    let physicsEnabled = true;
+
+    // Topology Definitions
+    // Clean initial coordinates spanning across a wider canvas area
+    const SWITCH_DEFS = [
+      { id: "s1", label: "s1\n[Ingress]", role: "ingress", x: -420, y: 0 },
+      { id: "s2", label: "s2", role: "core", x: -210, y: -190 },
+      { id: "s3", label: "s3", role: "core", x: -210, y: 0 },
+      { id: "s4", label: "s4", role: "core", x: -210, y: 190 },
+      { id: "s5", label: "s5", role: "core", x: 70, y: -140 },
+      { id: "s6", label: "s6", role: "core", x: 70, y: 20 },
+      { id: "s7", label: "s7", role: "core", x: 70, y: 190 },
+      { id: "s8", label: "s8\n[Egress]", role: "egress", x: 340, y: 0 },
+      { id: "s9", label: "s9", role: "core", x: 340, y: -190 },
+      { id: "s10", label: "s10", role: "egress", x: 340, y: 190 },
+    ];
+
+    const HOST_DEFS = [
+      { id: "h1", ip: "10.0.0.1", switch: "s1", x: -600, y: -70 },
+      { id: "h2", ip: "10.0.0.2", switch: "s1", x: -600, y: 70 },
+      { id: "h3", ip: "10.0.0.3", switch: "s2", x: -210, y: -340 },
+      { id: "h4", ip: "10.0.0.4", switch: "s2", x: -90, y: -340 },
+      { id: "h5", ip: "10.0.0.5", switch: "s9", x: 340, y: -340 },
+      { id: "h6", ip: "10.0.0.6", switch: "s9", x: 460, y: -340 },
+      { id: "h7", ip: "10.0.0.7", switch: "s10", x: 520, y: 130 },
+      { id: "h8", ip: "10.0.0.8", switch: "s10", x: 520, y: 250 },
+    ];
+
+    // Canonical 21 switch links
+    const SWITCH_LINKS = [
+      ["s1", "s2"], ["s2", "s3"], ["s3", "s5"], ["s5", "s8"], ["s8", "s9"],
+      ["s1", "s4"], ["s4", "s5"],
+      ["s1", "s3"], ["s3", "s6"], ["s6", "s8"],
+      ["s4", "s6"], ["s6", "s7"], ["s7", "s9"],
+      ["s2", "s4"], ["s4", "s7"], ["s7", "s8"],
+      ["s3", "s4"], ["s5", "s6"], ["s5", "s7"], ["s8", "s10"], ["s9", "s10"],
+    ];
+
+    // Candidate Paths mapping
+    const PATH_DEFINITIONS = {
+      path1: { name: "Path 1", hops: ["s1", "s4", "s7", "s8"], links: ["s1-s4", "s4-s7", "s7-s8"] },
+      path2: { name: "Path 2", hops: ["s1", "s3", "s6", "s8"], links: ["s1-s3", "s3-s6", "s6-s8"] },
+      path3: { name: "Path 3", hops: ["s1", "s4", "s5", "s8"], links: ["s1-s4", "s4-s5", "s5-s8"] },
+      path4: { name: "Path 4", hops: ["s1", "s4", "s6", "s8"], links: ["s1-s4", "s4-s6", "s6-s8"] },
+      path5: { name: "Path 5", hops: ["s1", "s3", "s5", "s8"], links: ["s1-s3", "s3-s5", "s5-s8"] },
+    };
+
+    // Local state mirror for fallback simulation
+    let localLinkStates = {};
+    let localActivePolicy = {
+      policy_id: "P0",
+      name: "Primary: 100% Path 1 (s1-s4-s7-s8)",
+      weights: { path1: 100, path2: 0, path3: 0, path4: 0, path5: 0 },
+      group_id: 101
+    };
+
+    function normalizeLinkId(u, v) {
+      return u <= v ? `${u}-${v}` : `${v}-${u}`;
+    }
+
+    // Initialize Link States
+    SWITCH_LINKS.forEach(([u, v]) => {
+      const key = normalizeLinkId(u, v);
+      localLinkStates[key] = "up";
+    });
+
+    // Populate dropdown with all links
+    function populateLinkDropdown() {
+      const select = document.getElementById("link-select");
+      select.innerHTML = "";
+      
+      SWITCH_LINKS.forEach(([u, v]) => {
+        const key = normalizeLinkId(u, v);
+        const opt = document.createElement("option");
+        opt.value = key;
+        
+        let tag = "";
+        if (key === "s4-s7") tag = " [Path 1 Critical]";
+        else if (key === "s1-s4") tag = " [Path 1 / 3 / 4]";
+        else if (key === "s1-s3") tag = " [Path 2 / 5]";
+        else if (key === "s3-s6") tag = " [Path 2 Critical]";
+        else if (key === "s6-s8") tag = " [Path 2 Critical]";
+        else if (key === "s7-s8") tag = " [Path 1 Critical]";
+
+        opt.textContent = `${u} <—> ${v}${tag}`;
+        select.appendChild(opt);
+      });
+    }
+
+    // ========================================================================
+    // VIS.JS INITIALIZATION WITH OPTIMIZED PHYSICS & STYLING
+    // ========================================================================
+    function initNetworkGraph() {
+      const container = document.getElementById("topology-network");
+
+      // 1. Prepare Nodes
+      const nodes = [];
+
+      // Add Switches: shape: 'box', darker slate background (#1e293b), bright cyan border (#38bdf8), monospaced white font
+      SWITCH_DEFS.forEach(sw => {
+        nodes.push({
+          id: sw.id,
+          label: sw.label,
+          shape: "box",
+          x: sw.x,
+          y: sw.y,
+          color: {
+            background: "#1e293b",
+            border: "#38bdf8",
+            highlight: { background: "#0f172a", border: "#7dd3fc" },
+            hover: { background: "#334155", border: "#38bdf8" }
+          },
+          font: {
+            color: "#ffffff",
+            face: "JetBrains Mono, ui-monospace, monospace",
+            size: 13,
+            bold: true,
+          },
+          borderWidth: 2,
+          margin: { top: 10, bottom: 10, left: 14, right: 14 },
+          shadow: { enabled: true, color: "rgba(0,0,0,0.6)", size: 8, x: 2, y: 3 },
+          nodeType: "switch",
+        });
+      });
+
+      // Add Container Hosts: shape: 'dot', emerald green fill (#059669), size: 16, white text labels
+      HOST_DEFS.forEach(h => {
+        nodes.push({
+          id: h.id,
+          label: `${h.id}\n${h.ip}`,
+          shape: "dot",
+          size: 16,
+          x: h.x,
+          y: h.y,
+          color: {
+            background: "#059669",
+            border: "#10b981",
+            highlight: { background: "#047857", border: "#6ee7b7" },
+            hover: { background: "#10b981", border: "#a7f3d0" }
+          },
+          font: {
+            color: "#ffffff",
+            face: "JetBrains Mono, ui-monospace, monospace",
+            size: 11,
+            bold: false,
+            vadjust: 0,
+            background: "rgba(15, 23, 42, 0.75)",
+          },
+          borderWidth: 2,
+          shadow: { enabled: true, color: "rgba(0,0,0,0.5)", size: 6, x: 1, y: 2 },
+          nodeType: "host",
+          ip: h.ip,
+          attachedSwitch: h.switch,
+        });
+      });
+
+      // 2. Prepare Edges
+      // Glowing cyan/blue (#00d2ff), width: 2, smooth continuous curves with roundness: 0.2
+      const edges = [];
+
+      // Add Switch Links
+      SWITCH_LINKS.forEach(([u, v]) => {
+        const key = normalizeLinkId(u, v);
+        edges.push({
+          id: key,
+          from: u,
+          to: v,
+          width: 2,
+          color: {
+            color: "#00d2ff",
+            highlight: "#38bdf8",
+            hover: "#67e8f9",
+          },
+          smooth: {
+            type: "continuous",
+            roundness: 0.2,
+          },
+          title: `Link: ${u} <-> ${v}\nBandwidth: 100 Mbps\nDelay: 2ms\nStatus: UP`,
+          edgeType: "switch-link",
+          srcSwitch: u,
+          dstSwitch: v,
+        });
+      });
+
+      // Add Host-to-Switch Links
+      HOST_DEFS.forEach(h => {
+        const key = `${h.id}-${h.switch}`;
+        edges.push({
+          id: key,
+          from: h.id,
+          to: h.switch,
+          width: 1.5,
+          color: {
+            color: "#0284c7",
+            highlight: "#38bdf8",
+            hover: "#38bdf8",
+          },
+          dashes: [3, 3],
+          smooth: {
+            type: "continuous",
+            roundness: 0.1,
+          },
+          title: `Host Link: ${h.id} -> ${h.switch}\nIP: ${h.ip}/24`,
+          edgeType: "host-link",
+        });
+      });
+
+      nodesDataSet = new vis.DataSet(nodes);
+      edgesDataSet = new vis.DataSet(edges);
+
+      const data = { nodes: nodesDataSet, edges: edgesDataSet };
+
+      // Physics options: forceAtlas2Based with springLength >= 180, centralGravity: 0.005, gravitationalConstant: -70
+      const options = {
+        physics: {
+          enabled: true,
+          solver: "forceAtlas2Based",
+          forceAtlas2Based: {
+            gravitationalConstant: -70,
+            centralGravity: 0.005,
+            springLength: 180,
+            springConstant: 0.08,
+            damping: 0.45,
+            avoidOverlap: 0.7,
+          },
+          stabilization: {
+            enabled: true,
+            iterations: 150,
+            updateInterval: 25,
+          },
+        },
+        interaction: {
+          hover: true,
+          tooltipDelay: 100,
+          navigationButtons: false,
+          zoomView: true,
+          dragView: true,
+        },
+      };
+
+      network = new vis.Network(container, data, options);
+
+      // Requirement: Auto-center and fit network on stabilizationIterationsDone with smooth animation
+      network.on("stabilizationIterationsDone", function() {
+        network.fit({
+          animation: {
+            duration: 800,
+            easingFunction: "easeInOutQuad",
+          },
+        });
+        logConsole("Graph layout settled and centered automatically.", "text-teal-400");
+      });
+
+      // Also ensure fitting on stabilization complete
+      network.on("stabilized", function() {
+        network.fit({
+          animation: {
+            duration: 600,
+            easingFunction: "easeInOutQuad",
+          },
+        });
+      });
+
+      // Event: Edge & Node Click Inspector
+      network.on("click", function(params) {
+        if (params.edges.length > 0 && params.nodes.length === 0) {
+          const edgeId = params.edges[0];
+          inspectEdge(edgeId);
+        } else if (params.nodes.length > 0) {
+          const nodeId = params.nodes[0];
+          inspectNode(nodeId);
+        } else {
+          closeInspector();
+        }
+      });
+
+      // Responsive resize fitting
+      window.addEventListener("resize", () => {
+        if (network) {
+          network.fit();
+        }
+      });
+
+      logConsole("Vis.js topology engine initialized (forceAtlas2Based, springLength: 180, centralGravity: 0.005).", "text-teal-400");
+    }
+
+    // Requirement: Wire "Fit View" button so clicking calls network.fit({ animation: { duration: 500 } })
+    function resetGraphFit() {
+      if (network) {
+        network.fit({
+          animation: {
+            duration: 500,
+            easingFunction: "easeInOutQuad"
+          }
+        });
+      }
+    }
+
+    function togglePhysics() {
+      physicsEnabled = !physicsEnabled;
+      network.setOptions({ physics: { enabled: physicsEnabled } });
+      document.getElementById("btn-physics").textContent = `Physics: ${physicsEnabled ? "On" : "Off"}`;
+      logConsole(`Graph physics simulation toggled ${physicsEnabled ? "ON" : "OFF"}.`, "text-slate-400");
+    }
+
+    function highlightPrimaryPaths() {
+      const p1Edges = ["s1-s4", "s4-s7", "s7-s8"];
+      const p2Edges = ["s1-s3", "s3-s6", "s6-s8"];
+
+      edgesDataSet.forEach(e => {
+        if (p1Edges.includes(e.id)) {
+          edgesDataSet.update({ id: e.id, color: { color: "#38bdf8" }, width: 4.5 });
+        } else if (p2Edges.includes(e.id)) {
+          edgesDataSet.update({ id: e.id, color: { color: "#a855f7" }, width: 3.5 });
+        }
+      });
+
+      logConsole("Highlighted Path 1 (Cyan: s1-s4-s7-s8) and Path 2 (Purple: s1-s3-s6-s8).", "text-teal-300");
+
+      setTimeout(() => {
+        refreshEdgeVisuals();
+      }, 4000);
+    }
+
+    function inspectEdge(edgeId) {
+      const edge = edgesDataSet.get(edgeId);
+      if (!edge || edge.edgeType !== "switch-link") return;
+
+      const inspector = document.getElementById("selection-inspector");
+      const title = document.getElementById("inspect-title");
+      const body = document.getElementById("inspect-body");
+      const action = document.getElementById("inspect-action");
+
+      const isDown = localLinkStates[edgeId] === "down";
+
+      title.textContent = `Link: ${edgeId}`;
+      body.innerHTML = `
+        <div>From: <strong>${edge.srcSwitch}</strong> &rarr; To: <strong>${edge.dstSwitch}</strong></div>
+        <div>Capacity: 100 Mbps · Delay: 2ms</div>
+        <div>Current State: <strong class="${isDown ? 'text-rose-400' : 'text-emerald-400'}">${isDown ? 'FAILED (DOWN)' : 'HEALTHY (UP)'}</strong></div>
+      `;
+
+      action.innerHTML = isDown
+        ? `<button onclick="toggleSelectedLink('up', '${edgeId}')" class="w-full px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-mono font-bold">Recover Link</button>`
+        : `<button onclick="toggleSelectedLink('down', '${edgeId}')" class="w-full px-2.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-xs font-mono font-bold">Bring Link Down</button>`;
+
+      inspector.classList.remove("hidden");
+
+      // Auto-select in control panel dropdown
+      const sel = document.getElementById("link-select");
+      if (sel) sel.value = edgeId;
+    }
+
+    function inspectNode(nodeId) {
+      const node = nodesDataSet.get(nodeId);
+      if (!node) return;
+
+      const inspector = document.getElementById("selection-inspector");
+      const title = document.getElementById("inspect-title");
+      const body = document.getElementById("inspect-body");
+      const action = document.getElementById("inspect-action");
+
+      title.textContent = `Node: ${nodeId}`;
+
+      if (node.nodeType === "switch") {
+        body.innerHTML = `
+          <div>Type: OpenFlow 1.3 Switch</div>
+          <div>DPID: of:000000000000000${nodeId.replace('s', '')}</div>
+          <div>Role: ${nodeId === 's1' ? 'Ingress Switch' : (['s8','s9','s10'].includes(nodeId) ? 'Egress Switch' : 'Core Mesh')}</div>
+          <div>Status: <span class="text-emerald-400">ACTIVE</span></div>
+        `;
+        action.innerHTML = `<button onclick="closeInspector()" class="w-full px-2 py-1 bg-slate-800 text-slate-300 rounded text-xs font-mono">Close</button>`;
+      } else {
+        body.innerHTML = `
+          <div>Type: Docker Container (Containernet)</div>
+          <div>IP: <strong>${node.ip}</strong> / 24</div>
+          <div>Attached Switch: <strong>${node.attachedSwitch}</strong></div>
+          <div>Image: ubuntu:trusty</div>
+        `;
+        action.innerHTML = `<button onclick="quickSelectHost('${nodeId}')" class="w-full px-2 py-1 bg-teal-700 hover:bg-teal-600 text-white rounded text-xs font-mono">Select for iperf</button>`;
+      }
+
+      inspector.classList.remove("hidden");
+    }
+
+    function quickSelectHost(hId) {
+      document.getElementById("iperf-src").value = hId;
+      logConsole(`Selected ${hId} as source host for iperf benchmark.`, "text-slate-400");
+      closeInspector();
+    }
+
+    function closeInspector() {
+      document.getElementById("selection-inspector").classList.add("hidden");
+    }
+
+    // Requirement: Update edge visuals based on localLinkStates (healthy: #00d2ff, failed: red/dashed)
+    function refreshEdgeVisuals() {
+      if (!edgesDataSet) return;
+
+      edgesDataSet.forEach(edge => {
+        if (edge.edgeType === "switch-link") {
+          const isDown = localLinkStates[edge.id] === "down";
+          if (isDown) {
+            edgesDataSet.update({
+              id: edge.id,
+              width: 3,
+              dashes: [6, 4],
+              color: { color: "#ef4444", highlight: "#f87171", hover: "#dc2626" },
+              title: `Link: ${edge.id}\nSTATUS: FAILED / INTERFACE DOWN`,
+            });
+          } else {
+            edgesDataSet.update({
+              id: edge.id,
+              width: 2,
+              dashes: false,
+              color: { color: "#00d2ff", highlight: "#38bdf8", hover: "#67e8f9" },
+              title: `Link: ${edge.id}\nBandwidth: 100 Mbps\nDelay: 2ms\nSTATUS: HEALTHY`,
+            });
+          }
+        }
+      });
+    }
+
+    // ========================================================================
+    // API BRIDGE INTEGRATION & FALLBACK SIMULATION
+    // ========================================================================
+
+    async function fetchStatus(isManual = false) {
+      const connPill = document.getElementById("connection-pill");
+      const connText = document.getElementById("connection-status-text");
+
+      try {
+        const resp = await fetch(`${API_BASE_URL}/api/status`, { signal: AbortSignal.timeout(2000) });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        
+        const data = await resp.json();
+        isBridgeOnline = true;
+
+        connPill.className = "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-mono border-emerald-500/30 bg-emerald-500/10 text-emerald-400";
+        connText.textContent = `Bridge: Online (${data.environment ? (data.environment.containernet_active ? "Live Mininet" : "Sim") : "Connected"})`;
+
+        // Update metrics
+        if (data.metrics) {
+          updateMetricsUI(data.metrics);
+        }
+
+        // Update link states from server
+        if (data.links) {
+          data.links.forEach(l => {
+            if (l.type === "switch-to-switch") {
+              localLinkStates[l.id] = l.status;
+            }
+          });
+          refreshEdgeVisuals();
+        }
+
+        if (data.active_policy) {
+          localActivePolicy = data.active_policy;
+          updatePolicyUI(data.active_policy);
+        }
+
+        if (data.candidate_paths) {
+          renderCandidatePaths(data.candidate_paths);
+        }
+
+        document.getElementById("canvas-last-sync").textContent = `Synced: ${new Date().toLocaleTimeString()}`;
+        if (isManual) {
+          logConsole("Network status synchronized with http://localhost:5000.", "text-emerald-400");
+        }
+
+      } catch (err) {
+        isBridgeOnline = false;
+        connPill.className = "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-mono border-amber-500/30 bg-amber-500/10 text-amber-400";
+        connText.textContent = "Simulation Mode (Bridge Offline)";
+
+        // Run client-side simulation update
+        runSimulationStatusUpdate();
+
+        if (isManual) {
+          logConsole(`Local API bridge unreachable at ${API_BASE_URL}. Running in client-side simulation mode. Start 'python3 app.py' to connect.`, "text-amber-400");
+        }
+      }
+    }
+
+    function updateMetricsUI(m) {
+      document.getElementById("stat-throughput").textContent = m.throughput_mbps.toFixed(1);
+      document.getElementById("stat-throughput-bar").style.width = `${Math.min(100, m.throughput_mbps)}%`;
+      document.getElementById("stat-latency").textContent = m.average_latency_ms.toFixed(1);
+      
+      const lossElem = document.getElementById("stat-loss");
+      lossElem.textContent = `${m.packet_loss_pct.toFixed(1)}%`;
+      if (m.packet_loss_pct > 0) {
+        lossElem.className = "text-2xl font-bold font-mono text-rose-400 tabular-nums";
+        document.getElementById("stat-loss-label").textContent = "Packet Drop / Path Broken";
+      } else {
+        lossElem.className = "text-2xl font-bold font-mono text-emerald-400 tabular-nums";
+        document.getElementById("stat-loss-label").textContent = "Healthy Full Reachability";
+      }
+
+      document.getElementById("stat-flows").textContent = m.active_flows;
+      document.getElementById("stat-links").textContent = `${m.active_links_count || 21}/${m.total_links_count || 21}`;
+    }
+
+    function updatePolicyUI(pol) {
+      document.getElementById("policy-badge").textContent = `${pol.policy_id}: ${pol.name.split(':')[0]}`;
+      document.getElementById("policy-desc").textContent = pol.name;
+      document.getElementById("policy-group-id").textContent = pol.group_id || "101";
+      document.getElementById("policy-updated").textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+    }
+
+    function runSimulationStatusUpdate() {
+      // Evaluate Candidate Path 1..5 in local simulation
+      const pathStatus = {};
+      Object.entries(PATH_DEFINITIONS).forEach(([pid, p]) => {
+        let isFailed = false;
+        p.links.forEach(lId => {
+          if (localLinkStates[lId] === "down") isFailed = true;
+        });
+        pathStatus[pid] = isFailed ? "FAILED" : "HEALTHY";
+      });
+
+      const p1Down = pathStatus["path1"] === "FAILED";
+      const p2Down = pathStatus["path2"] === "FAILED";
+
+      let tp = 94.8;
+      let lat = 4.2;
+      let loss = 0.0;
+
+      if (p1Down && p2Down) {
+        tp = 0.0;
+        loss = 100.0;
+        lat = 0.0;
+      } else if (p1Down && localActivePolicy.policy_id === "P0") {
+        tp = 12.4;
+        loss = 86.8;
+        lat = 18.2;
+      } else if (p1Down && localActivePolicy.policy_id === "P4") {
+        tp = 93.6;
+        loss = 0.0;
+        lat = 5.8;
+      }
+
+      const activeLinksCount = Object.values(localLinkStates).filter(s => s === "up").length;
+
+      updateMetricsUI({
+        throughput_mbps: tp,
+        average_latency_ms: lat,
+        packet_loss_pct: loss,
+        active_flows: 24,
+        active_links_count: activeLinksCount,
+        total_links_count: 21,
+      });
+
+      const candPaths = Object.entries(PATH_DEFINITIONS).map(([pid, p]) => ({
+        id: pid,
+        name: p.name,
+        hops: p.hops,
+        status: pathStatus[pid],
+        egress_port: (pid === "path1" || pid === "path3" || pid === "path4") ? 4 : 3,
+        weight_pct: localActivePolicy.weights[pid] || 0,
+      }));
+
+      renderCandidatePaths(candPaths);
+      refreshEdgeVisuals();
+    }
+
+    function renderCandidatePaths(paths) {
+      const container = document.getElementById("candidate-paths-grid");
+      if (!container) return;
+      container.innerHTML = "";
+
+      paths.forEach(p => {
+        const isFailed = p.status === "FAILED";
+        const isDegraded = p.status === "DEGRADED";
+        const hasWeight = p.weight_pct > 0;
+
+        const card = document.createElement("div");
+        card.className = `p-3 rounded-lg border font-mono text-xs flex flex-col justify-between ${
+          isFailed
+            ? "bg-rose-950/20 border-rose-800 text-rose-300"
+            : hasWeight
+            ? "bg-teal-950/20 border-teal-500/50 text-teal-200 shadow-md"
+            : "bg-slate-950 border-slate-800 text-slate-400"
+        }`;
+
+        card.innerHTML = `
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="font-bold text-white">${p.name}</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded ${
+              isFailed ? "bg-rose-500/20 text-rose-400" : (isDegraded ? "bg-amber-500/20 text-amber-400" : "bg-emerald-500/20 text-emerald-400")
+            }">${p.status}</span>
+          </div>
+          <div class="text-[11px] text-slate-400 mb-2 truncate">${p.hops.join(" &rarr; ")}</div>
+          <div class="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px]">
+            <span>Port: ${p.egress_port}</span>
+            <strong class="${hasWeight ? 'text-teal-400' : 'text-slate-500'}">Weight: ${p.weight_pct}%</strong>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    // ========================================================================
+    // ACTION: RUN PINGALL
+    // ========================================================================
+    async function runPingAll() {
+      const btn = document.getElementById("btn-pingall");
+      const spinner = document.getElementById("ping-spinner");
+      const text = document.getElementById("ping-text");
+      const summary = document.getElementById("pingall-result-summary");
+
+      btn.disabled = true;
+      spinner.classList.remove("hidden");
+      text.textContent = "Testing...";
+
+      logConsole("*** [TEST] Launching PingAll full-mesh reachability test across 8 Docker containers (56 pairs)...", "text-teal-300");
+
+      try {
+        let result;
+        if (isBridgeOnline) {
+          const resp = await fetch(`${API_BASE_URL}/api/test/pingall`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          });
+          result = await resp.json();
+        } else {
+          // Client-side simulation
+          await new Promise(r => setTimeout(r, 600));
+          result = simulatePingAll();
+        }
+
+        logConsole(result.output_log || `PingAll: ${result.success_rate_pct}% success, ${result.loss_rate_pct}% loss`, result.loss_rate_pct > 0 ? "text-amber-300" : "text-emerald-300");
+
+        summary.classList.remove("hidden");
+        summary.innerHTML = `
+          <div class="flex items-center justify-between mb-1">
+            <span class="font-bold text-white">PingAll Completed (${result.duration_sec || 0.42}s)</span>
+            <span class="${result.loss_rate_pct > 0 ? 'text-rose-400' : 'text-emerald-400'} font-bold">${result.success_rate_pct}% Success</span>
+          </div>
+          <div class="text-slate-400 text-[11px]">Pairs tested: 56 · Dropped: ${result.failed_pings || 0} · Loss: ${result.loss_rate_pct}%</div>
+        `;
+
+        if (result.matrix) {
+          renderMatrixTable(result.matrix);
+        }
+
+        document.getElementById("stat-loss").textContent = `${result.loss_rate_pct}%`;
+        if (result.loss_rate_pct > 0) {
+          document.getElementById("stat-loss").className = "text-2xl font-bold font-mono text-rose-400 tabular-nums";
+        } else {
+          document.getElementById("stat-loss").className = "text-2xl font-bold font-mono text-emerald-400 tabular-nums";
+        }
+
+      } catch (err) {
+        logConsole(`PingAll test failed: ${err.message}`, "text-rose-400");
+      } finally {
+        btn.disabled = false;
+        spinner.classList.add("hidden");
+        text.textContent = "Run PingAll";
+      }
+    }
+
+    function simulatePingAll() {
+      const hosts = ["h1", "h2", "h3", "h4", "h5", "h6", "h7", "h8"];
+      let failed = 0;
+      let total = 56;
+      const matrix = {};
+
+      const p1Down = localLinkStates["s1-s4"] === "down" || localLinkStates["s4-s7"] === "down" || localLinkStates["s7-s8"] === "down";
+      const p2Down = localLinkStates["s1-s3"] === "down" || localLinkStates["s3-s6"] === "down" || localLinkStates["s6-s8"] === "down";
+
+      hosts.forEach(src => {
+        matrix[src] = {};
+        hosts.forEach(dst => {
+          if (src === dst) return;
+          let ok = true;
+          if (localLinkStates["s8-s10"] === "down" && (dst === "h7" || dst === "h8") && (src !== "h7" && src !== "h8")) {
+            ok = false;
+          }
+          if (p1Down && p2Down && (src === "h1" || src === "h2") && (dst === "h7" || dst === "h8")) {
+            ok = false;
+          }
+          matrix[src][dst] = ok;
+          if (!ok) failed++;
+        });
+      });
+
+      const loss = round((failed / total) * 100, 1);
+      const log = `*** PingAll Simulation: ${total - failed}/${total} received (${loss}% packet loss across topology).`;
+
+      return {
+        success: true,
+        total_pairs: total,
+        successful_pings: total - failed,
+        failed_pings: failed,
+        success_rate_pct: 100 - loss,
+        loss_rate_pct: loss,
+        matrix: matrix,
+        duration_sec: 0.38,
+        output_log: log
+      };
+    }
+
+    function renderMatrixTable(matrix) {
+      const table = document.getElementById("matrix-table");
+      if (!table) return;
+      table.innerHTML = "";
+
+      const hosts = Object.keys(matrix);
+
+      const thead = document.createElement("thead");
+      let headerHtml = `<tr class="border-b border-slate-800 text-slate-400"><th class="p-2 text-left">From \\ To</th>`;
+      hosts.forEach(h => {
+        headerHtml += `<th class="p-2 text-center">${h}</th>`;
+      });
+      headerHtml += `</tr>`;
+      thead.innerHTML = headerHtml;
+      table.appendChild(thead);
+
+      const tbody = document.createElement("tbody");
+      hosts.forEach(src => {
+        const tr = document.createElement("tr");
+        tr.className = "border-b border-slate-800/50 hover:bg-slate-950/60";
+        let rowHtml = `<td class="p-2 font-bold text-white">${src}</td>`;
+        hosts.forEach(dst => {
+          if (src === dst) {
+            rowHtml += `<td class="p-2 text-center text-slate-600">-</td>`;
+          } else {
+            const ok = matrix[src][dst];
+            rowHtml += `<td class="p-2 text-center ${ok ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold bg-rose-950/30'}">${ok ? '✓' : '✕'}</td>`;
+          }
+        });
+        tr.innerHTML = rowHtml;
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+    }
+
+    // ========================================================================
+    // ACTION: LINK FAILURE & RECOVERY TOGGLE
+    // ========================================================================
+    async function toggleSelectedLink(action, specificLinkId = null) {
+      const linkId = specificLinkId || document.getElementById("link-select").value;
+      if (!linkId) return;
+
+      logConsole(`*** [LINK] Triggering link state modification: ${linkId} &rarr; ${action.toUpperCase()}...`, "text-amber-300");
+
+      try {
+        let result;
+        if (isBridgeOnline) {
+          const resp = await fetch(`${API_BASE_URL}/api/link/toggle`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ link_id: linkId, action: action }),
+          });
+          result = await resp.json();
+          localLinkStates[linkId] = result.new_state;
+        } else {
+          localLinkStates[linkId] = action;
+          result = {
+            success: true,
+            link_id: linkId,
+            new_state: action,
+            output_log: `[SIMULATION] Link ${linkId} toggled to ${action.toUpperCase()}. Open vSwitch port state updated.`,
+          };
+        }
+
+        logConsole(result.output_log || `Link ${linkId} is now ${action.toUpperCase()}`, action === "down" ? "text-rose-400" : "text-emerald-400");
+        
+        refreshEdgeVisuals();
+        runSimulationStatusUpdate();
+
+        if (!document.getElementById("selection-inspector").classList.contains("hidden")) {
+          inspectEdge(linkId);
+        }
+
+      } catch (err) {
+        logConsole(`Link toggle failed: ${err.message}`, "text-rose-400");
+      }
+    }
+
+    function quickFailoverPath1() {
+      toggleSelectedLink("down", "s4-s7");
+      logConsole("Scenario Shortcut: Simulated hard failure on Path 1 critical link (s4-s7). Click 'Trigger Reroute' to failover!", "text-amber-300");
+    }
+
+    function quickRestoreAll() {
+      SWITCH_LINKS.forEach(([u, v]) => {
+        const key = normalizeLinkId(u, v);
+        localLinkStates[key] = "up";
+      });
+      refreshEdgeVisuals();
+      runSimulationStatusUpdate();
+      logConsole("Scenario Shortcut: All 21 topology links restored to OPERATIONAL (UP).", "text-emerald-400");
+    }
+
+    // ========================================================================
+    // ACTION: MEASURE BANDWIDTH (IPERF)
+    // ========================================================================
+    async function runIperf() {
+      const src = document.getElementById("iperf-src").value;
+      const dst = document.getElementById("iperf-dst").value;
+
+      if (src === dst) {
+        logConsole("Cannot run iperf between identical source and target.", "text-rose-400");
+        return;
+      }
+
+      const btn = document.getElementById("btn-iperf");
+      const spinner = document.getElementById("iperf-spinner");
+      const text = document.getElementById("iperf-text");
+
+      btn.disabled = true;
+      spinner.classList.remove("hidden");
+      text.textContent = "Measuring...";
+
+      logConsole(`*** [IPERF] Starting throughput measurement between ${src} and ${dst} (duration: 3s)...`, "text-teal-300");
+
+      try {
+        let result;
+        if (isBridgeOnline) {
+          const resp = await fetch(`${API_BASE_URL}/api/test/iperf`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ source: src, target: dst, protocol: "tcp", duration: 3 }),
+          });
+          result = await resp.json();
+        } else {
+          await new Promise(r => setTimeout(r, 700));
+          result = simulateIperf(src, dst);
+        }
+
+        if (result.success) {
+          logConsole(result.output_log || `iperf: ${result.bandwidth_mbps} Mbps, jitter ${result.jitter_ms} ms`, "text-teal-200");
+          document.getElementById("stat-throughput").textContent = result.bandwidth_mbps.toFixed(1);
+          document.getElementById("stat-throughput-bar").style.width = `${Math.min(100, result.bandwidth_mbps)}%`;
+          document.getElementById("stat-latency").textContent = result.latency_ms.toFixed(1);
+        } else {
+          logConsole(`iperf FAILED: ${result.error || 'Connection refused or no route to host'}`, "text-rose-400");
+          document.getElementById("stat-throughput").textContent = "0.0";
+          document.getElementById("stat-throughput-bar").style.width = "0%";
+        }
+
+      } catch (err) {
+        logConsole(`iperf error: ${err.message}`, "text-rose-400");
+      } finally {
+        btn.disabled = false;
+        spinner.classList.add("hidden");
+        text.textContent = "Run iperf Test";
+      }
+    }
+
+    function simulateIperf(src, dst) {
+      const p1Down = localLinkStates["s1-s4"] === "down" || localLinkStates["s4-s7"] === "down" || localLinkStates["s7-s8"] === "down";
+      const p2Down = localLinkStates["s1-s3"] === "down" || localLinkStates["s3-s6"] === "down" || localLinkStates["s6-s8"] === "down";
+
+      if (p1Down && localActivePolicy.policy_id === "P0" && (src === "h1" || src === "h2") && (dst === "h7" || dst === "h8")) {
+        return {
+          success: false,
+          source: src,
+          target: dst,
+          bandwidth_mbps: 0.0,
+          latency_ms: 0.0,
+          error: "Connection timeout: Primary Path 1 link s4-s7 is DOWN and no reroute has been triggered."
+        };
+      }
+
+      const bw = +(92 + Math.random() * 3.5).toFixed(1);
+      const jit = +(0.2 + Math.random() * 0.25).toFixed(3);
+      const lat = +(3.8 + Math.random() * 1.2).toFixed(1);
+
+      const log = [
+        `------------------------------------------------------------`,
+        `Client connecting to ${dst}, TCP port 5001`,
+        `[  3]  0.0-3.0 sec   33.8 MBytes  ${bw} Mbits/sec (Jitter: ${jit} ms, RTT: ${lat} ms)`,
+        `*** Path: ${src} -> s1 -> [Multi-Path Mesh] -> s10 -> ${dst}`,
+      ].join("\n");
+
+      return {
+        success: true,
+        source: src,
+        target: dst,
+        bandwidth_mbps: bw,
+        jitter_ms: jit,
+        latency_ms: lat,
+        output_log: log,
+      };
+    }
+
+    // ========================================================================
+    // ACTION: TRIGGER DYNAMIC REROUTE
+    // ========================================================================
+    async function triggerReroute() {
+      const strat = document.getElementById("reroute-strategy").value;
+      const btn = document.getElementById("btn-reroute");
+
+      btn.disabled = true;
+      btn.textContent = "Rerouting...";
+
+      logConsole(`*** [REROUTE] Evaluating candidate paths using strategy '${strat}'...`, "text-teal-300");
+
+      try {
+        let result;
+        if (isBridgeOnline) {
+          const resp = await fetch(`${API_BASE_URL}/api/reroute`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ strategy: strat }),
+          });
+          result = await resp.json();
+          localActivePolicy = result.selected_policy;
+        } else {
+          await new Promise(r => setTimeout(r, 400));
+          result = simulateReroute(strat);
+          localActivePolicy = result.selected_policy;
+        }
+
+        logConsole(result.output_log, "text-teal-300");
+        updatePolicyUI(result.selected_policy);
+        runSimulationStatusUpdate();
+
+        logConsole(`Multi-path traffic successfully shifted to ${result.selected_policy.name}`, "text-emerald-400");
+
+      } catch (err) {
+        logConsole(`Reroute error: ${err.message}`, "text-rose-400");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Trigger Reroute";
+      }
+    }
+
+    function simulateReroute(strat) {
+      const p1Down = localLinkStates["s1-s4"] === "down" || localLinkStates["s4-s7"] === "down" || localLinkStates["s7-s8"] === "down";
+      const p2Down = localLinkStates["s1-s3"] === "down" || localLinkStates["s3-s6"] === "down" || localLinkStates["s6-s8"] === "down";
+
+      let newPol;
+      if (!p1Down && !p2Down) {
+        newPol = {
+          policy_id: "P0",
+          name: "Primary: 100% Path 1 (s1-s4-s7-s8)",
+          weights: { path1: 100, path2: 0, path3: 0, path4: 0, path5: 0 },
+          group_id: 101
+        };
+      } else if (p1Down && !p2Down) {
+        newPol = {
+          policy_id: "P4",
+          name: "Failover: 100% Path 2 (s1-s3-s6-s8)",
+          weights: { path1: 0, path2: 100, path3: 0, path4: 0, path5: 0 },
+          group_id: 102
+        };
+      } else if (!p1Down && p2Down) {
+        newPol = {
+          policy_id: "P0",
+          name: "Primary: 100% Path 1 (s1-s4-s7-s8)",
+          weights: { path1: 100, path2: 0, path3: 0, path4: 0, path5: 0 },
+          group_id: 101
+        };
+      } else {
+        newPol = {
+          policy_id: "P3",
+          name: "Alternate Path 3: s1-s4-s5-s8",
+          weights: { path1: 0, path2: 0, path3: 100, path4: 0, path5: 0 },
+          group_id: 104
+        };
+      }
+
+      const log = [
+        `*** Dynamic Reroute Evaluation Complete`,
+        `  Path 1 (s1-s4-s7-s8): ${p1Down ? 'FAILED' : 'HEALTHY'}`,
+        `  Path 2 (s1-s3-s6-s8): ${p2Down ? 'FAILED' : 'HEALTHY'}`,
+        `  Selected Policy: ${newPol.policy_id} (${newPol.name})`,
+        `  OpenFlow SELECT Group installed on s1 (ID ${newPol.group_id})`,
+        `  Convergence Time: 2.14 ms`,
+      ].join("\n");
+
+      return {
+        success: true,
+        selected_policy: newPol,
+        output_log: log,
+      };
+    }
+
+    // ========================================================================
+    // CONSOLE LOGGER & UTILITIES
+    // ========================================================================
+    function logConsole(message, colorClass = "text-slate-300") {
+      const consoleElem = document.getElementById("execution-console");
+      if (!consoleElem) return;
+
+      const timeStr = new Date().toTimeString().split(" ")[0];
+      const lines = message.split("\n");
+
+      lines.forEach(line => {
+        const div = document.createElement("div");
+        div.className = `${colorClass} whitespace-pre-wrap leading-relaxed`;
+        div.textContent = `[${timeStr}] ${line}`;
+        consoleElem.appendChild(div);
+      });
+
+      if (document.getElementById("autoscroll-toggle").checked) {
+        consoleElem.scrollTop = consoleElem.scrollHeight;
+      }
+    }
+
+    function clearConsole() {
+      const consoleElem = document.getElementById("execution-console");
+      consoleElem.innerHTML = `<div class="text-slate-500">[${new Date().toTimeString().split(" ")[0]}] Console cleared.</div>`;
+    }
+
+    function copyConsoleLogs() {
+      const consoleElem = document.getElementById("execution-console");
+      navigator.clipboard.writeText(consoleElem.innerText).then(() => {
+        logConsole("Console logs copied to clipboard.", "text-emerald-400");
+      });
+    }
+
+    function switchView(viewName) {
+      const visContainer = document.getElementById("topology-network").parentElement.parentElement;
+      const pathsContainer = document.getElementById("view-paths-container");
+      const matrixContainer = document.getElementById("view-matrix-container");
+
+      const tabVis = document.getElementById("tab-visualizer");
+      const tabPaths = document.getElementById("tab-paths");
+      const tabMatrix = document.getElementById("tab-matrix");
+
+      [tabVis, tabPaths, tabMatrix].forEach(t => t.className = "hover:text-white transition-colors flex items-center gap-1.5 whitespace-nowrap text-slate-400");
+
+      if (viewName === "visualizer") {
+        visContainer.classList.remove("hidden");
+        pathsContainer.classList.add("hidden");
+        matrixContainer.classList.add("hidden");
+        tabVis.className = "text-white hover:text-white transition-colors flex items-center gap-1.5 whitespace-nowrap font-bold";
+        resetGraphFit();
+      } else if (viewName === "paths") {
+        pathsContainer.classList.remove("hidden");
+        matrixContainer.classList.add("hidden");
+        tabPaths.className = "text-white hover:text-white transition-colors flex items-center gap-1.5 whitespace-nowrap font-bold";
+      } else if (viewName === "matrix") {
+        matrixContainer.classList.remove("hidden");
+        pathsContainer.classList.add("hidden");
+        tabMatrix.className = "text-white hover:text-white transition-colors flex items-center gap-1.5 whitespace-nowrap font-bold";
+        runPingAll();
+      }
+    }
+
+    // Modal API Config
+    function openApiModal() {
+      document.getElementById("modal-api-url").value = API_BASE_URL;
+      document.getElementById("api-modal").classList.remove("hidden");
+    }
+
+    function closeApiModal() {
+      document.getElementById("api-modal").classList.add("hidden");
+    }
+
+    function saveApiUrl() {
+      const newUrl = document.getElementById("modal-api-url").value.trim().replace(/\/$/, "");
+      if (newUrl) {
+        API_BASE_URL = newUrl;
+        localStorage.setItem("sdn_api_url", newUrl);
+        document.getElementById("bridge-url-display").textContent = `API: ${newUrl.replace('http://', '')}`;
+        closeApiModal();
+        fetchStatus(true);
+      }
+    }
+
+    function round(val, dec) {
+      return Number(Math.round(val + 'e' + dec) + 'e-' + dec);
+    }
+
+    // ========================================================================
+    // INITIALIZATION ON DOM READY
+    // ========================================================================
+    window.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("bridge-url-display").textContent = `API: ${API_BASE_URL.replace('http://', '')}`;
+      populateLinkDropdown();
+      initNetworkGraph();
+      fetchStatus();
+
+      // Periodic status heartbeat polling (every 4 seconds)
+      setInterval(() => {
+        fetchStatus(false);
+      }, 4000);
+    });
+  </script>
+</body>
+</html>
+
